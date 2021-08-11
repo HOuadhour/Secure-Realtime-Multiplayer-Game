@@ -96,7 +96,7 @@ io.on("connection", socket => {
 
     io.emit("player-scores", scores);
 
-    if (playersC[0].score === 10) {
+    if (playersC[0].score === 50) {
       io.emit("game-ended", true);
     }
 
