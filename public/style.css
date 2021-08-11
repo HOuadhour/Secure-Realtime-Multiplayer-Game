@@ -1,0 +1,25 @@
+body {
+  margin: 20px;
+}
+
+code {
+  background: #d0d0d5;
+}
+
+canvas {
+  /* margin: auto; */
+  background-color: hsl(270, 100%, 10%);
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* @media (min-width: 800px) {
+  .container {
+    flex-direction: row;
+  }
+} */
