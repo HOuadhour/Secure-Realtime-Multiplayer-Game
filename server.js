@@ -3,11 +3,14 @@ const express = require("express");
 const expect = require("chai");
 const socket = require("socket.io");
 const helmet = require("helmet");
+const cors = require("cors");
 
 const fccTestingRoutes = require("./routes/fcctesting.js");
 const runner = require("./test-runner.js");
 
 const app = express();
+
+app.use(cors({ origin: "*" })); //For FCC testing purposes only
 
 app.use(helmet.noSniff());
 app.use(helmet.xssFilter());
