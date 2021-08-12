@@ -47,7 +47,7 @@ export function getDirection(key) {
 export function drawEnd(context, canvas, score) {
   context.font = "28px monospace";
   context.textAlign = "center";
-  if (score >= 10) {
+  if (score >= 50) {
     context.fillText("You won the game, refresh and start again", canvas.width / 2, canvas.height / 2);
   } else {
     context.fillText("You lost the game, refresh and start again", canvas.width / 2, canvas.height / 2);
