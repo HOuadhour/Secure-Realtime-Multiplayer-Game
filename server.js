@@ -54,58 +54,71 @@ module.exports = app; // For testing
 
 const io = socket(server);
 const Collectible = require("./public/Collectible.mjs");
+const { getRandomInt } = require("./public/utils.mjs");
+const Player = require("./public/Player.mjs");
 
 function generateCoin() {
   const coin = new Collectible({
-    x: Math.floor(Math.random() * (760 - 10) + 10),
-    y: Math.floor(Math.random() * (560 - 40) + 40),
+    x: getRandomInt(10, 760),
+    y: getRandomInt(40, 560),
     id: Date.now(),
-    value: Math.floor(Math.random() * (5 - 2) + 2),
+    value: getRandomInt(0, 3),
   });
   return coin;
 }
 
-let players = [];
-let coin = generateCoin();
+let playersServer = [];
+let coinServer = generateCoin();
 
 io.on("connection", socket => {
-  socket.emit("player-in", socket.id);
-  socket.emit("coin-init", coin);
-  socket.on("player-created", player => {
-    players.push(player);
-    io.emit("player-pushed", players);
-  });
-  socket.on("player-moved", playersC => {
-    players = playersC;
-    socket.broadcast.emit("player-moved", players);
-  });
-  socket.on("player-stopped", playersC => {
-    players = playersC;
-    socket.broadcast.emit("player-stopped", players);
-  });
+  const playerExists = playersServer.findIndex(player => player.id === socket.id);
+  if (playerExists === -1) {
+    // create a new player if it is not already in the list
+    const player = new Player({ score: 0, id: socket.id });
+    playersServer.push(player);
+  }
+  io.emit("game-start", { id: socket.id, playersServer, coinServer });
 
-  socket.on("coin-touched", playersC => {
-    // send rank back to clients
-    players = playersC;
-    const scores = {};
-    playersC
-      .sort((a, b) => b.score - a.score)
-      .forEach((player, idx) => {
-        scores[player.id] = idx + 1;
-      });
-
-    io.emit("player-scores", scores);
-
-    if (playersC[0].score === 50) {
-      io.emit("game-ended", true);
+  socket.on("player-moved", ({ direction, currentPlayer }) => {
+    const otherPlayer = playersServer.find(player => player.id === currentPlayer.id);
+    if (otherPlayer) {
+      otherPlayer.x = currentPlayer.x;
+      otherPlayer.y = currentPlayer.y;
+      socket.broadcast.emit("player-moved", { direction, otherPlayer });
     }
+  });
 
-    coin = generateCoin();
-    io.emit("coin-added", coin);
+  socket.on("player-stopped", ({ direction, currentPlayer }) => {
+    const otherPlayer = playersServer.find(player => player.id === currentPlayer.id);
+    if (otherPlayer) {
+      otherPlayer.x = currentPlayer.x;
+      otherPlayer.y = currentPlayer.y;
+      socket.broadcast.emit("player-stopped", { direction, otherPlayer });
+    }
+  });
+
+  socket.on("coin-touched", toucher => {
+    const otherPlayer = playersServer.find(player => player.id === toucher.id);
+    if (otherPlayer) {
+      otherPlayer.score = toucher.score;
+      coinServer = generateCoin();
+
+      if (otherPlayer.score >= 50) {
+        io.emit("game-end", otherPlayer);
+      } else {
+        io.emit("coin-touched", { coinServer, otherPlayer });
+      }
+    }
+  });
+
+  socket.on("game-end", winner => {
+    const otherPlayer = playersServer.find(player => player.id === winner.id);
+    otherPlayer.score = winner.score;
+    io.emit("game-end", otherPlayer);
   });
 
   socket.on("disconnect", () => {
-    players = players.filter(player => player.id !== socket.id);
-    io.emit("player-out", players);
+    playersServer = playersServer.filter(player => player.id !== socket.id);
+    io.emit("player-removed", { id: socket.id, playersServer });
   });
 });

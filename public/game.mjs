@@ -1,19 +1,7 @@
 import Player from "./Player.mjs";
 import Collectible from "./Collectible.mjs";
 import coords from "./Canvas.mjs";
-import {
-  loadImages,
-  clearCanvas,
-  drawOutline,
-  drawInfo,
-  drawPlayers,
-  movePlayer,
-  getDirection,
-  drawCoin,
-  isEaten,
-  drawEnd,
-} from "./utils.mjs";
-import { getRandomInt } from "./utils.mjs";
+import { loadImages, drawOutline, drawInfo, clearCanvas, getDirection, drawEnd } from "./utils.mjs";
 
 const socket = io();
 const canvas = document.getElementById("game-window");
@@ -31,109 +19,110 @@ const images = [
 ];
 const imageObjects = loadImages(images);
 
-let playersC = [];
-let coinC;
-let scoresC = {};
-let gameEndedC = false;
+let playersClient = [];
+let coinClient;
 let frame;
-
-function start() {
-  requestAnimationFrame(drawGame);
-}
+let endGame = false;
 
 function drawGame() {
-  if (!gameEndedC) {
-    clearCanvas(context, canvas);
-    drawInfo(context, canvas, coords, scoresC[socket.id], playersC.length, drawGame);
-    drawOutline(context, coords.playField);
-    drawPlayers(context, imageObjects, playersC, socket);
-    drawCoin(context, imageObjects, coinC);
-    const currentPlayer = playersC.findIndex(player => player.id === socket.id);
-    if (currentPlayer !== -1) {
-      const player = movePlayer(playersC[currentPlayer], coords.playField);
-      playersC[currentPlayer] = player;
-      if (player.dx || player.dy) {
-        socket.emit("player-moved", playersC);
-      }
-    }
-    if (isEaten(playersC[currentPlayer], coinC)) {
-      playersC[currentPlayer].score++;
-      socket.emit("coin-touched", playersC);
-      coinC.x = -30;
-    }
+  clearCanvas(context, canvas);
+
+  playersClient.forEach(player => {
+    player.drawPlayers(context, imageObjects.slice(0, 2), socket, playersClient);
+  });
+  drawInfo(context, canvas, coords.margin);
+  drawOutline(context, coords.playField);
+  coinClient?.draw(context, imageObjects.slice(2));
+
+  const currentPlayer = playersClient.find(player => player.id === socket.id);
+  if (currentPlayer.collision(coinClient)) {
+    currentPlayer.score++;
+    coinClient.x = -30;
+    socket.emit("coin-touched", currentPlayer);
+  }
+
+  if (!endGame) {
+    frame = requestAnimationFrame(drawGame);
   } else {
+    const currentPlayer = playersClient.find(player => player.id === socket.id);
     clearCanvas(context, canvas);
-    drawInfo(context, canvas, coords, scoresC[socket.id], playersC.length, drawGame);
+    playersClient.forEach(player => {
+      player.drawPlayers(context, imageObjects.slice(0, 2), socket, playersClient);
+    });
+    drawInfo(context, canvas, coords.margin);
     drawOutline(context, coords.playField);
-    drawEnd(context, canvas, scoresC[socket.id]);
+    drawEnd(context, canvas, currentPlayer.score);
   }
 }
 
-socket.on("player-in", playerID => {
-  const player = new Player({ x: coords.random.avatar.x, y: coords.random.avatar.y, id: playerID, score: 0 });
-  socket.emit("player-created", player);
-});
-
-socket.on("player-pushed", players => {
-  playersC = players;
-});
-
-socket.on("player-out", players => {
-  playersC = players;
-});
-
-document.addEventListener("keydown", event => {
+function keyDown(event) {
+  const currentPlayer = playersClient.find(player => player.id === socket.id);
   const direction = getDirection(event.key);
-  const currentPlayer = playersC.findIndex(player => player.id === socket.id);
-
-  if (direction === "left") {
-    playersC[currentPlayer].dx = -playersC[currentPlayer].step;
-  } else if (direction === "right") {
-    playersC[currentPlayer].dx = playersC[currentPlayer].step;
-  } else if (direction === "up") {
-    playersC[currentPlayer].dy = -playersC[currentPlayer].step;
-  } else if (direction === "down") {
-    playersC[currentPlayer].dy = playersC[currentPlayer].step;
-  }
-});
-
-document.addEventListener("keyup", event => {
-  const direction = getDirection(event.key);
-  const currentPlayer = playersC.findIndex(player => player.id === socket.id);
-  if (direction == "left" || direction == "right") {
-    playersC[currentPlayer].dx = 0;
-  } else if (direction == "up" || direction == "down") {
-    playersC[currentPlayer].dy = 0;
-  }
-
   if (direction) {
-    socket.emit("player-stopped", playersC);
+    currentPlayer.startMoving(direction);
+    socket.emit("player-moved", { direction, currentPlayer });
   }
-});
+}
 
-socket.on("player-moved", players => {
-  playersC = players;
-});
+function keyUp(event) {
+  const currentPlayer = playersClient.find(player => player.id === socket.id);
+  const direction = getDirection(event.key);
+  if (direction) {
+    currentPlayer.stopMoving(direction);
+    socket.emit("player-stopped", { direction, currentPlayer });
+  }
+}
 
-socket.on("player-stopped", players => {
-  playersC = players;
-});
+socket.on("game-start", ({ id, playersServer, coinServer }) => {
+  console.log(`${id} connected.`);
+  cancelAnimationFrame(frame);
+  playersClient = playersServer.map(player => new Player(player));
+  coinClient = new Collectible(coinServer);
 
-socket.on("coin-init", coin => {
-  coinC = coin;
-});
+  document.addEventListener("keydown", keyDown);
+  document.addEventListener("keyup", keyUp);
 
-socket.on("coin-added", coin => {
-  coinC = coin;
-});
+  socket.on("player-moved", ({ direction, otherPlayer }) => {
+    const movingPlayer = playersClient.find(player => player.id === otherPlayer.id);
+    movingPlayer.startMoving(direction);
 
-socket.on("player-scores", scores => {
-  scoresC = scores;
-});
+    // in case of lag
+    movingPlayer.x = otherPlayer.x;
+    movingPlayer.y = otherPlayer.y;
+  });
 
-socket.on("game-ended", gameEnded => {
-  gameEndedC = gameEnded;
-  console.log(gameEndedC);
-});
+  socket.on("player-stopped", ({ direction, otherPlayer }) => {
+    const stoppingPlayer = playersClient.find(player => player.id === otherPlayer.id);
+    stoppingPlayer.stopMoving(direction);
 
-start();
+    // in case of lag
+    stoppingPlayer.x = otherPlayer.x;
+    stoppingPlayer.y = otherPlayer.y;
+  });
+
+  socket.on("coin-touched", ({ coinServer, otherPlayer }) => {
+    const toucher = playersClient.find(player => player.id === otherPlayer.id);
+    coinClient = new Collectible(coinServer);
+    toucher.score = otherPlayer.score;
+  });
+
+  socket.on("game-end", otherPlayer => {
+    const winner = playersClient.find(player => player.id === otherPlayer.id);
+    winner.score = otherPlayer.score;
+    endGame = true;
+    playersClient.forEach(player => {
+      if (player.id === socket.id) {
+        console.log(`Your score is ${player.score}/50`);
+      } else {
+        console.log(`Their score is ${player.score}/50`);
+      }
+    });
+  });
+
+  socket.on("player-removed", ({ id, playersServer }) => {
+    console.log(`${id} disconnected.`);
+    playersClient = playersServer.map(player => new Player(player));
+  });
+
+  drawGame();
+});
